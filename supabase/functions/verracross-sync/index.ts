@@ -10,26 +10,17 @@ interface SyncRequest {
   userId?: string;
 }
 
-interface ParsedGrade {
-  subject: string;
-  grade: string;
-  assignment: string;
-  date: string;
-}
-
-interface ParsedAssignment {
-  subject: string;
-  title: string;
-  dueDate: string;
-  status: string;
-}
-
-interface ParsedAnnouncement {
-  title: string;
-  content: string;
-  date: string;
-  author: string;
-}
+// Veracross URLs to scrape
+const VERACROSS_URLS = {
+  portal: 'https://portals.veracross.com/sns/student',
+  courses: [
+    { id: '17681', name: 'Course 1', baseUrl: 'https://classes.veracross.com/sns/course/17681/website' },
+    { id: '17682', name: 'Course 2', baseUrl: 'https://classes.veracross.com/sns/course/17682/website' },
+    { id: '17683', name: 'Course 3', baseUrl: 'https://classes.veracross.com/sns/course/17683/website' },
+    { id: '17684', name: 'Course 4', baseUrl: 'https://classes.veracross.com/sns/course/17684/website' },
+    { id: '17685', name: 'Course 5', baseUrl: 'https://classes.veracross.com/sns/course/17685/website' },
+  ]
+};
 
 // Simple hash function for change detection
 function simpleHash(str: string): string {
@@ -42,71 +33,159 @@ function simpleHash(str: string): string {
   return hash.toString(16);
 }
 
-// Mock Verracross data - in production this would actually scrape the portal
-function generateMockPortalData(pageType: string) {
-  const now = new Date();
+// Fetch a page with optional cookies for auth
+async function fetchPage(url: string, cookies?: string): Promise<{ html: string; status: number }> {
+  console.log(`Fetching: ${url}`);
   
-  switch (pageType) {
-    case 'grades':
-      return {
-        gpa: '3.8',
-        grades: [
-          { subject: 'History', grade: 'A-', assignment: 'The Industrial Revolution Essay', date: now.toISOString() },
-          { subject: 'Mathematics', grade: 'B+', assignment: 'Calculus Quiz #4', date: now.toISOString() },
-          { subject: 'English', grade: 'A', assignment: 'Persuasive Writing', date: now.toISOString() },
-          { subject: 'Physics', grade: 'B', assignment: 'Lab Report #3', date: now.toISOString() },
-          { subject: 'Spanish', grade: 'A-', assignment: 'Oral Presentation', date: now.toISOString() },
-        ]
-      };
-    case 'assignments':
-      return {
-        pending: [
-          { subject: 'Physics', title: 'Lab Report #4', dueDate: '2024-12-17', status: 'pending' },
-          { subject: 'Spanish', title: 'Vocabulary Quiz', dueDate: '2024-12-18', status: 'pending' },
-          { subject: 'Art', title: 'Portfolio Submission', dueDate: '2024-12-20', status: 'pending' },
-          { subject: 'History', title: 'Chapter 12 Reading', dueDate: '2024-12-19', status: 'pending' },
-          { subject: 'Mathematics', title: 'Problem Set #8', dueDate: '2024-12-21', status: 'pending' },
-        ]
-      };
-    case 'announcements':
-      return {
-        announcements: [
-          { title: 'Spirit Week Starting Monday!', content: 'Get ready for themed dress days all week long. Monday is Pajama Day!', date: now.toISOString(), author: 'Student Council' },
-          { title: 'Winter Break Schedule', content: 'School closes Dec 20 at noon. Classes resume Jan 6.', date: now.toISOString(), author: 'Administration' },
-          { title: 'Holiday Concert', content: 'Join us for the annual winter concert on Dec 18 at 7pm in the auditorium.', date: now.toISOString(), author: 'Music Department' },
-        ]
-      };
-    case 'attendance':
-      return {
-        rate: '98%',
-        daysPresent: 42,
-        daysAbsent: 1,
-        daysLate: 2,
-        records: [
-          { date: now.toISOString(), status: 'present', period: 'All day' },
-        ]
-      };
-    case 'billing':
-      return {
-        balance: '$0.00',
-        nextDue: 'Feb 1, 2025',
-        nextAmount: '$8,500.00',
-        recentPayments: [
-          { date: '2024-12-01', amount: '$8,500.00', description: 'January Tuition', status: 'processed' },
-        ]
-      };
-    case 'calendar':
-      return {
-        events: [
-          { title: 'Math Final Exam', date: '2024-12-16', time: '9:00 AM', location: 'Room 204' },
-          { title: 'Winter Concert', date: '2024-12-18', time: '7:00 PM', location: 'Auditorium' },
-          { title: 'Parent-Teacher Conference', date: '2024-12-19', time: '3:00 PM', location: 'Various' },
-          { title: 'Winter Break Begins', date: '2024-12-20', time: '12:00 PM', location: '' },
-        ]
-      };
-    default:
-      return {};
+  const headers: Record<string, string> = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.5',
+  };
+  
+  if (cookies) {
+    headers['Cookie'] = cookies;
   }
+  
+  try {
+    const response = await fetch(url, { 
+      headers,
+      redirect: 'follow',
+    });
+    
+    const html = await response.text();
+    console.log(`Fetched ${url}: ${response.status}, length: ${html.length}`);
+    
+    return { html, status: response.status };
+  } catch (error) {
+    console.error(`Error fetching ${url}:`, error);
+    throw error;
+  }
+}
+
+// Parse course page content
+function parseCoursePageContent(html: string, courseId: string): any {
+  // Extract page titles and content from the HTML
+  const content: any = {
+    courseId,
+    pages: [],
+    announcements: [],
+    assignments: [],
+    rawLength: html.length,
+  };
+  
+  // Look for page titles (typically in h1, h2, or title elements)
+  const titleMatches = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+  if (titleMatches) {
+    content.pageTitle = titleMatches[1].trim();
+  }
+  
+  // Look for headings
+  const h1Matches = html.matchAll(/<h1[^>]*>([^<]+)<\/h1>/gi);
+  for (const match of h1Matches) {
+    content.pages.push({ type: 'heading', text: match[1].trim() });
+  }
+  
+  const h2Matches = html.matchAll(/<h2[^>]*>([^<]+)<\/h2>/gi);
+  for (const match of h2Matches) {
+    content.pages.push({ type: 'subheading', text: match[1].trim() });
+  }
+  
+  // Look for links to pages
+  const linkMatches = html.matchAll(/<a[^>]*href="([^"]*)"[^>]*>([^<]+)<\/a>/gi);
+  for (const match of linkMatches) {
+    if (match[1].includes('/pages/') || match[1].includes('/website/')) {
+      content.pages.push({ type: 'link', url: match[1], text: match[2].trim() });
+    }
+  }
+  
+  // Look for assignments (common patterns)
+  const assignmentPatterns = [
+    /<div[^>]*class="[^"]*assignment[^"]*"[^>]*>([\s\S]*?)<\/div>/gi,
+    /<tr[^>]*class="[^"]*assignment[^"]*"[^>]*>([\s\S]*?)<\/tr>/gi,
+    /<li[^>]*class="[^"]*assignment[^"]*"[^>]*>([\s\S]*?)<\/li>/gi,
+  ];
+  
+  for (const pattern of assignmentPatterns) {
+    const matches = html.matchAll(pattern);
+    for (const match of matches) {
+      content.assignments.push({ raw: match[1].substring(0, 500) });
+    }
+  }
+  
+  // Look for announcements
+  const announcementPatterns = [
+    /<div[^>]*class="[^"]*announcement[^"]*"[^>]*>([\s\S]*?)<\/div>/gi,
+    /<article[^>]*>([\s\S]*?)<\/article>/gi,
+  ];
+  
+  for (const pattern of announcementPatterns) {
+    const matches = html.matchAll(pattern);
+    for (const match of matches) {
+      const text = match[1].replace(/<[^>]+>/g, ' ').trim().substring(0, 500);
+      if (text.length > 10) {
+        content.announcements.push({ text });
+      }
+    }
+  }
+  
+  // Extract any dates found
+  const dateMatches = html.matchAll(/(\d{1,2}\/\d{1,2}\/\d{2,4}|\d{4}-\d{2}-\d{2}|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]* \d{1,2},? \d{4})/gi);
+  content.dates = [];
+  for (const match of dateMatches) {
+    content.dates.push(match[1]);
+  }
+  content.dates = [...new Set(content.dates)].slice(0, 20);
+  
+  return content;
+}
+
+// Parse student portal content
+function parsePortalContent(html: string): any {
+  const content: any = {
+    grades: [],
+    attendance: [],
+    calendar: [],
+    billing: [],
+    rawLength: html.length,
+  };
+  
+  // Extract title
+  const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+  if (titleMatch) {
+    content.pageTitle = titleMatch[1].trim();
+  }
+  
+  // Look for grade patterns
+  const gradePatterns = [
+    /grade[:\s]*([A-F][+-]?|\d{1,3}%?)/gi,
+    /<td[^>]*>([A-F][+-]?)<\/td>/gi,
+  ];
+  
+  for (const pattern of gradePatterns) {
+    const matches = html.matchAll(pattern);
+    for (const match of matches) {
+      content.grades.push({ value: match[1] });
+    }
+  }
+  
+  // Look for calendar/schedule items
+  const calendarPatterns = [
+    /<div[^>]*class="[^"]*event[^"]*"[^>]*>([\s\S]*?)<\/div>/gi,
+    /<div[^>]*class="[^"]*calendar[^"]*"[^>]*>([\s\S]*?)<\/div>/gi,
+  ];
+  
+  for (const pattern of calendarPatterns) {
+    const matches = html.matchAll(pattern);
+    for (const match of matches) {
+      const text = match[1].replace(/<[^>]+>/g, ' ').trim().substring(0, 200);
+      if (text.length > 5) {
+        content.calendar.push({ text });
+      }
+    }
+  }
+  
+  return content;
 }
 
 // Compare two snapshots and detect changes
@@ -118,115 +197,81 @@ function detectChanges(
   const changes: { category: string; title: string; message: string; details: any }[] = [];
   
   if (!oldData) {
-    // First sync - no changes to report
-    return [];
+    // First sync - report initial data found
+    if (newData.pages?.length > 0) {
+      changes.push({
+        category: 'announcement_added',
+        title: 'Initial Sync Complete 🎉',
+        message: `Found ${newData.pages.length} pages in ${pageType}`,
+        details: { pageCount: newData.pages.length, type: 'initial_sync' }
+      });
+    }
+    return changes;
   }
 
-  switch (pageType) {
-    case 'grades':
-      // Compare grades
-      const oldGrades = oldData.grades || [];
-      const newGrades = newData.grades || [];
-      
-      for (const newGrade of newGrades) {
-        const oldGrade = oldGrades.find((g: any) => 
-          g.subject === newGrade.subject && g.assignment === newGrade.assignment
-        );
-        
-        if (!oldGrade) {
-          changes.push({
-            category: 'grade_posted',
-            title: `New Grade Posted! 🎉`,
-            message: `You received a ${newGrade.grade} on "${newGrade.assignment}" in ${newGrade.subject}`,
-            details: newGrade
-          });
-        } else if (oldGrade.grade !== newGrade.grade) {
-          changes.push({
-            category: 'grade_updated',
-            title: 'Grade Updated',
-            message: `Your grade for "${newGrade.assignment}" in ${newGrade.subject} changed from ${oldGrade.grade} to ${newGrade.grade}`,
-            details: { old: oldGrade, new: newGrade }
-          });
-        }
+  // Compare content hashes
+  const oldHash = simpleHash(JSON.stringify(oldData));
+  const newHash = simpleHash(JSON.stringify(newData));
+  
+  if (oldHash !== newHash) {
+    // Content changed - analyze what changed
+    const oldPages = oldData.pages || [];
+    const newPages = newData.pages || [];
+    
+    // Check for new pages
+    for (const newPage of newPages) {
+      const exists = oldPages.find((p: any) => p.text === newPage.text && p.url === newPage.url);
+      if (!exists && newPage.text) {
+        changes.push({
+          category: 'assignment_added',
+          title: 'New Content Detected',
+          message: newPage.text.substring(0, 100),
+          details: newPage
+        });
       }
-      break;
-      
-    case 'assignments':
-      const oldAssignments = oldData.pending || [];
-      const newAssignments = newData.pending || [];
-      
-      for (const newAssignment of newAssignments) {
-        const oldAssignment = oldAssignments.find((a: any) => 
-          a.subject === newAssignment.subject && a.title === newAssignment.title
-        );
-        
-        if (!oldAssignment) {
-          changes.push({
-            category: 'assignment_added',
-            title: 'New Assignment',
-            message: `${newAssignment.title} in ${newAssignment.subject} - Due: ${newAssignment.dueDate}`,
-            details: newAssignment
-          });
-        } else if (oldAssignment.dueDate !== newAssignment.dueDate) {
-          changes.push({
-            category: 'assignment_due_changed',
-            title: 'Due Date Changed',
-            message: `${newAssignment.title} due date changed to ${newAssignment.dueDate}`,
-            details: { old: oldAssignment, new: newAssignment }
-          });
-        }
+    }
+    
+    // Check for new announcements
+    const oldAnnouncements = oldData.announcements || [];
+    const newAnnouncements = newData.announcements || [];
+    
+    for (const newAnn of newAnnouncements) {
+      const exists = oldAnnouncements.find((a: any) => a.text === newAnn.text);
+      if (!exists && newAnn.text) {
+        changes.push({
+          category: 'announcement_added',
+          title: 'New Announcement 📢',
+          message: newAnn.text.substring(0, 150),
+          details: newAnn
+        });
       }
-      break;
-      
-    case 'announcements':
-      const oldAnnouncements = oldData.announcements || [];
-      const newAnnouncements = newData.announcements || [];
-      
-      for (const newAnn of newAnnouncements) {
-        const exists = oldAnnouncements.find((a: any) => a.title === newAnn.title);
-        if (!exists) {
-          changes.push({
-            category: 'announcement_added',
-            title: 'New Announcement 📢',
-            message: `${newAnn.title}`,
-            details: newAnn
-          });
-        }
+    }
+    
+    // Check for new assignments
+    const oldAssignments = oldData.assignments || [];
+    const newAssignments = newData.assignments || [];
+    
+    for (const newAssign of newAssignments) {
+      const exists = oldAssignments.find((a: any) => a.raw === newAssign.raw);
+      if (!exists) {
+        changes.push({
+          category: 'assignment_added',
+          title: 'New Assignment',
+          message: 'New assignment content detected',
+          details: newAssign
+        });
       }
-      break;
-      
-    case 'calendar':
-      const oldEvents = oldData.events || [];
-      const newEvents = newData.events || [];
-      
-      for (const newEvent of newEvents) {
-        const exists = oldEvents.find((e: any) => 
-          e.title === newEvent.title && e.date === newEvent.date
-        );
-        if (!exists) {
-          changes.push({
-            category: 'calendar_event_added',
-            title: 'New Calendar Event 📅',
-            message: `${newEvent.title} on ${newEvent.date}`,
-            details: newEvent
-          });
-        }
-      }
-      
-      for (const oldEvent of oldEvents) {
-        const stillExists = newEvents.find((e: any) => 
-          e.title === oldEvent.title && e.date === oldEvent.date
-        );
-        if (!stillExists) {
-          changes.push({
-            category: 'calendar_event_removed',
-            title: 'Event Cancelled',
-            message: `${oldEvent.title} has been removed from the calendar`,
-            details: oldEvent
-          });
-        }
-      }
-      break;
+    }
+    
+    // If content changed but we couldn't identify specific changes
+    if (changes.length === 0 && oldData.rawLength !== newData.rawLength) {
+      changes.push({
+        category: 'assignment_updated',
+        title: 'Page Updated',
+        message: `Content changed (${oldData.rawLength} → ${newData.rawLength} bytes)`,
+        details: { oldLength: oldData.rawLength, newLength: newData.rawLength }
+      });
+    }
   }
   
   return changes;
@@ -268,7 +313,7 @@ Deno.serve(async (req) => {
       );
     }
 
-    console.log(`Starting sync for user ${userId}, action: ${body.action}`);
+    console.log(`Starting REAL sync for user ${userId}, action: ${body.action}`);
 
     // Update sync status to syncing
     await supabase.from('sync_status').upsert({
@@ -277,59 +322,161 @@ Deno.serve(async (req) => {
       last_sync_started: new Date().toISOString(),
     }, { onConflict: 'user_id' });
 
-    const pageTypes = ['grades', 'assignments', 'announcements', 'attendance', 'billing', 'calendar'];
-    const allChanges: any[] = [];
+    // Get user credentials if they exist
+    const { data: credentials } = await supabase
+      .from('user_credentials')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('is_active', true)
+      .maybeSingle();
 
-    for (const pageType of pageTypes) {
-      console.log(`Syncing ${pageType} for user ${userId}`);
+    const cookies = credentials?.encrypted_password; // Using this field to store session cookies for now
+    
+    const allChanges: any[] = [];
+    const syncResults: any[] = [];
+
+    // Scrape the student portal
+    try {
+      console.log('Scraping student portal...');
+      const { html, status } = await fetchPage(VERACROSS_URLS.portal, cookies);
       
-      // Get current data from "Verracross" (mock data for now)
-      const newData = generateMockPortalData(pageType);
-      const contentHash = simpleHash(JSON.stringify(newData));
+      const portalData = parsePortalContent(html);
+      const contentHash = simpleHash(JSON.stringify(portalData));
       
-      // Get the most recent snapshot for this page type
+      // Get existing snapshot
       const { data: existingSnapshot } = await supabase
         .from('page_snapshots')
         .select('*')
         .eq('user_id', userId)
-        .eq('page_type', pageType)
+        .eq('page_type', 'grades')
         .order('captured_at', { ascending: false })
         .limit(1)
         .maybeSingle();
+
+      // Detect changes
+      const changes = detectChanges('portal', existingSnapshot?.parsed_data, portalData);
       
-      // Check if content has changed
-      if (!existingSnapshot || existingSnapshot.content_hash !== contentHash) {
-        // Detect changes
-        const changes = detectChanges(pageType, existingSnapshot?.parsed_data, newData);
+      // Save snapshot
+      await supabase.from('page_snapshots').insert({
+        user_id: userId,
+        page_type: 'grades',
+        content_hash: contentHash,
+        parsed_data: portalData,
+        raw_content: html.substring(0, 50000), // Store first 50KB of HTML
+        captured_at: new Date().toISOString(),
+      });
+
+      // Save changes
+      for (const change of changes) {
+        await supabase.from('detected_changes').insert({
+          user_id: userId,
+          page_type: 'grades',
+          category: change.category,
+          title: change.title,
+          message: change.message,
+          details: change.details,
+          is_read: false,
+          detected_at: new Date().toISOString(),
+        });
+        allChanges.push(change);
+      }
+
+      syncResults.push({
+        type: 'portal',
+        url: VERACROSS_URLS.portal,
+        status,
+        dataLength: html.length,
+        pagesFound: portalData.grades?.length || 0,
+        changesDetected: changes.length
+      });
+    } catch (error) {
+      console.error('Error scraping portal:', error);
+      syncResults.push({
+        type: 'portal',
+        url: VERACROSS_URLS.portal,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+
+    // Scrape each course
+    for (const course of VERACROSS_URLS.courses) {
+      try {
+        console.log(`Scraping course ${course.id}...`);
         
-        // Save new snapshot
+        // Fetch main course page
+        const mainPageUrl = course.baseUrl;
+        const { html: mainHtml, status: mainStatus } = await fetchPage(mainPageUrl, cookies);
+        
+        // Fetch pages listing
+        const pagesUrl = `${course.baseUrl}/pages`;
+        const { html: pagesHtml, status: pagesStatus } = await fetchPage(pagesUrl, cookies);
+        
+        // Combine and parse content
+        const combinedHtml = mainHtml + pagesHtml;
+        const courseData = parseCoursePageContent(combinedHtml, course.id);
+        courseData.courseName = course.name;
+        
+        const contentHash = simpleHash(JSON.stringify(courseData));
+        
+        // Get existing snapshot for this course (using assignments type)
+        const { data: existingSnapshot } = await supabase
+          .from('page_snapshots')
+          .select('*')
+          .eq('user_id', userId)
+          .eq('page_type', 'assignments')
+          .order('captured_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        // Detect changes
+        const changes = detectChanges(`course_${course.id}`, existingSnapshot?.parsed_data, courseData);
+        
+        // Save snapshot
         await supabase.from('page_snapshots').insert({
           user_id: userId,
-          page_type: pageType,
+          page_type: 'assignments',
           content_hash: contentHash,
-          parsed_data: newData,
+          parsed_data: courseData,
+          raw_content: combinedHtml.substring(0, 50000),
           captured_at: new Date().toISOString(),
         });
-        
-        // Save detected changes
+
+        // Save changes
         for (const change of changes) {
-          const { error: changeError } = await supabase.from('detected_changes').insert({
+          await supabase.from('detected_changes').insert({
             user_id: userId,
-            page_type: pageType,
+            page_type: 'assignments',
             category: change.category,
-            title: change.title,
+            title: `[${course.name}] ${change.title}`,
             message: change.message,
-            details: change.details,
+            details: { ...change.details, courseId: course.id, courseName: course.name },
             is_read: false,
             detected_at: new Date().toISOString(),
           });
-          
-          if (changeError) {
-            console.error('Error saving change:', changeError);
-          } else {
-            allChanges.push(change);
-          }
+          allChanges.push({ ...change, course: course.name });
         }
+
+        syncResults.push({
+          type: 'course',
+          courseId: course.id,
+          courseName: course.name,
+          url: mainPageUrl,
+          status: mainStatus,
+          dataLength: combinedHtml.length,
+          pagesFound: courseData.pages?.length || 0,
+          announcementsFound: courseData.announcements?.length || 0,
+          assignmentsFound: courseData.assignments?.length || 0,
+          changesDetected: changes.length
+        });
+        
+      } catch (error) {
+        console.error(`Error scraping course ${course.id}:`, error);
+        syncResults.push({
+          type: 'course',
+          courseId: course.id,
+          courseName: course.name,
+          error: error instanceof Error ? error.message : 'Unknown error'
+        });
       }
     }
 
@@ -345,18 +492,19 @@ Deno.serve(async (req) => {
       is_syncing: false,
       last_sync_completed: new Date().toISOString(),
       last_sync_error: null,
-      next_scheduled_sync: new Date(Date.now() + 15 * 60 * 1000).toISOString(), // 15 minutes from now
+      next_scheduled_sync: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
       total_syncs: (currentStatus?.total_syncs || 0) + 1,
       successful_syncs: (currentStatus?.successful_syncs || 0) + 1,
     }, { onConflict: 'user_id' });
 
-    console.log(`Sync completed for user ${userId}. Found ${allChanges.length} changes.`);
+    console.log(`Sync completed for user ${userId}. Scraped ${syncResults.length} pages, found ${allChanges.length} changes.`);
 
     return new Response(
       JSON.stringify({ 
         success: true, 
         changesFound: allChanges.length,
         changes: allChanges,
+        syncResults,
         syncedAt: new Date().toISOString(),
         nextSync: new Date(Date.now() + 15 * 60 * 1000).toISOString()
       }),
