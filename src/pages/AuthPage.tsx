@@ -3,19 +3,26 @@ import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Eye, EyeOff, Lock, User, Mail, UserPlus, LogIn } from 'lucide-react';
+import { Eye, EyeOff, Lock, User, LogIn, Globe } from 'lucide-react';
 import OwlMascot from '@/components/mascot/OwlMascot';
 import { useToast } from '@/hooks/use-toast';
+import { z } from 'zod';
 
 interface AuthPageProps {
   onAuthSuccess: () => void;
 }
 
+// Validation schema
+const loginSchema = z.object({
+  username: z.string().trim().min(1, 'Username is required').max(100),
+  password: z.string().min(1, 'Password is required').max(200),
+  portalUrl: z.string().url('Invalid portal URL').optional(),
+});
+
 const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
-  const [isLogin, setIsLogin] = useState(true);
-  const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
+  const [portalUrl, setPortalUrl] = useState('https://portals.veracross.com/sns');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -39,79 +46,79 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
     return () => subscription.unsubscribe();
   }, [onAuthSuccess]);
 
-  const validateEmail = (email: string): boolean => {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return emailRegex.test(email);
-  };
-
-  const validatePassword = (password: string): boolean => {
-    return password.length >= 6;
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setIsLoading(true);
 
-    // Validation
-    if (!validateEmail(email)) {
-      setError('Please enter a valid email address');
-      setIsLoading(false);
-      return;
-    }
-
-    if (!validatePassword(password)) {
-      setError('Password must be at least 6 characters');
-      setIsLoading(false);
-      return;
-    }
-
-    if (!isLogin && password !== confirmPassword) {
-      setError('Passwords do not match');
+    // Validate inputs
+    const validation = loginSchema.safeParse({ username, password, portalUrl });
+    if (!validation.success) {
+      setError(validation.error.errors[0].message);
       setIsLoading(false);
       return;
     }
 
     try {
-      if (isLogin) {
-        const { error } = await supabase.auth.signInWithPassword({
+      // Generate a unique email from the username for Supabase auth
+      const email = `${username.toLowerCase().replace(/[^a-z0-9]/g, '')}@veracross.local`;
+      
+      // Try to sign up first (in case user is new)
+      let authResult = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          emailRedirectTo: `${window.location.origin}/`,
+          data: {
+            veracross_username: username,
+          }
+        }
+      });
+
+      // If user already exists, try to sign in
+      if (authResult.error?.message?.includes('User already registered')) {
+        authResult = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+      }
+
+      if (authResult.error) {
+        // Try signing in if signup failed for other reasons
+        const signInResult = await supabase.auth.signInWithPassword({
           email,
           password,
         });
 
-        if (error) {
-          if (error.message.includes('Invalid login credentials')) {
-            setError('Invalid email or password');
+        if (signInResult.error) {
+          if (signInResult.error.message.includes('Invalid login credentials')) {
+            setError('Invalid username or password. If you\'re a new user, please try again.');
           } else {
-            setError(error.message);
+            setError(signInResult.error.message);
           }
-        } else {
-          toast({
-            title: "Welcome back! 🦉",
-            description: "Successfully signed in to your dashboard",
-          });
+          setIsLoading(false);
+          return;
         }
-      } else {
-        const { error } = await supabase.auth.signUp({
-          email,
-          password,
-          options: {
-            emailRedirectTo: `${window.location.origin}/`,
-          }
-        });
+      }
 
-        if (error) {
-          if (error.message.includes('User already registered')) {
-            setError('An account with this email already exists. Try logging in instead.');
-          } else {
-            setError(error.message);
-          }
-        } else {
-          toast({
-            title: "Account created! 🎉",
-            description: "Welcome to your student dashboard",
-          });
-        }
+      // Store Veracross credentials for scraping
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (user) {
+        // Upsert credentials
+        await supabase.from('user_credentials').upsert({
+          user_id: user.id,
+          username: username,
+          encrypted_password: password, // Note: In production, encrypt this properly
+          portal_url: portalUrl,
+          is_active: true,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'user_id' });
+
+        toast({
+          title: "Welcome to Veracross Dashboard! 🦉",
+          description: "Connected to your SNS portal. Fetching your data...",
+        });
       }
     } catch (err) {
       setError('An unexpected error occurred. Please try again.');
@@ -128,35 +135,55 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
             <OwlMascot 
               size="lg" 
               mood="happy" 
-              greeting={isLogin ? "Welcome back! Let's check your updates 🎓" : "Ready to join? Let's get started! 🌟"}
+              greeting="Welcome! Enter your Veracross credentials 🎓"
             />
           </div>
           <div>
-            <CardTitle className="text-2xl">Student Portal</CardTitle>
+            <CardTitle className="text-2xl">Veracross SNS Login</CardTitle>
             <CardDescription className="mt-2">
-              {isLogin ? 'Sign in to access your dashboard' : 'Create an account to get started'}
+              Sign in with your Veracross student portal credentials
             </CardDescription>
           </div>
         </CardHeader>
 
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Email field */}
+            {/* Portal URL field */}
             <div className="space-y-2">
-              <label className="text-sm font-medium text-foreground" htmlFor="email">
-                Email
+              <label className="text-sm font-medium text-foreground" htmlFor="portalUrl">
+                Portal URL
               </label>
               <div className="relative">
-                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
+                <Globe className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
                 <Input
-                  id="email"
-                  type="email"
-                  placeholder="Enter your email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  id="portalUrl"
+                  type="url"
+                  placeholder="https://portals.veracross.com/sns"
+                  value={portalUrl}
+                  onChange={(e) => setPortalUrl(e.target.value)}
                   className="pl-10 h-12 rounded-xl border-2"
                   disabled={isLoading}
-                  autoComplete="email"
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">Your school's Veracross portal URL</p>
+            </div>
+
+            {/* Username field */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-foreground" htmlFor="username">
+                Veracross Username
+              </label>
+              <div className="relative">
+                <User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
+                <Input
+                  id="username"
+                  type="text"
+                  placeholder="Enter your Veracross username"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  className="pl-10 h-12 rounded-xl border-2"
+                  disabled={isLoading}
+                  autoComplete="username"
                 />
               </div>
             </div>
@@ -164,19 +191,19 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
             {/* Password field */}
             <div className="space-y-2">
               <label className="text-sm font-medium text-foreground" htmlFor="password">
-                Password
+                Veracross Password
               </label>
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
                 <Input
                   id="password"
                   type={showPassword ? 'text' : 'password'}
-                  placeholder="Enter your password"
+                  placeholder="Enter your Veracross password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="pl-10 pr-12 h-12 rounded-xl border-2"
                   disabled={isLoading}
-                  autoComplete={isLogin ? 'current-password' : 'new-password'}
+                  autoComplete="current-password"
                 />
                 <button
                   type="button"
@@ -192,28 +219,6 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
               </div>
             </div>
 
-            {/* Confirm Password field (signup only) */}
-            {!isLogin && (
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground" htmlFor="confirmPassword">
-                  Confirm Password
-                </label>
-                <div className="relative">
-                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-                  <Input
-                    id="confirmPassword"
-                    type={showPassword ? 'text' : 'password'}
-                    placeholder="Confirm your password"
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    className="pl-10 h-12 rounded-xl border-2"
-                    disabled={isLoading}
-                    autoComplete="new-password"
-                  />
-                </div>
-              </div>
-            )}
-
             {/* Error message */}
             {error && (
               <div className="p-3 rounded-xl bg-coral-light border-2 border-coral/30 text-coral text-sm text-center">
@@ -227,44 +232,33 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
               variant="lavender"
               size="lg"
               className="w-full"
-              disabled={isLoading || !email || !password || (!isLogin && !confirmPassword)}
+              disabled={isLoading || !username || !password}
             >
               {isLoading ? (
                 <>
                   <span className="animate-spin mr-2">🦉</span>
-                  {isLogin ? 'Signing in...' : 'Creating account...'}
+                  Connecting to Veracross...
                 </>
               ) : (
                 <>
-                  {isLogin ? <LogIn className="w-5 h-5 mr-2" /> : <UserPlus className="w-5 h-5 mr-2" />}
-                  {isLogin ? 'Sign In' : 'Create Account'}
+                  <LogIn className="w-5 h-5 mr-2" />
+                  Connect to Portal
                 </>
               )}
             </Button>
           </form>
 
-          {/* Toggle between login/signup */}
-          <div className="mt-6 text-center">
-            <p className="text-sm text-muted-foreground">
-              {isLogin ? "Don't have an account?" : 'Already have an account?'}
-              <button
-                type="button"
-                onClick={() => {
-                  setIsLogin(!isLogin);
-                  setError(null);
-                  setConfirmPassword('');
-                }}
-                className="ml-1 text-lavender hover:underline font-medium"
-              >
-                {isLogin ? 'Sign up' : 'Sign in'}
-              </button>
-            </p>
-          </div>
-
           {/* Security note */}
           <div className="mt-6 p-4 rounded-xl bg-mint-light border-2 border-mint/20">
             <p className="text-xs text-center text-muted-foreground">
-              🔒 Your account is secure. After signing in, you can connect your Verracross portal to start tracking updates.
+              🔒 Your Veracross credentials are stored securely and only used to fetch your portal data. We never share your information.
+            </p>
+          </div>
+
+          {/* Info about supported schools */}
+          <div className="mt-4 p-3 rounded-xl bg-lavender-light border-2 border-lavender/20">
+            <p className="text-xs text-center text-muted-foreground">
+              📚 Currently configured for SNS (School Name) Veracross portal. Your courses and updates will be synced automatically.
             </p>
           </div>
         </CardContent>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { 
   GraduationCap, 
   ClipboardList, 
@@ -10,7 +10,14 @@ import {
   Settings,
   LogOut,
   RefreshCw,
-  Zap
+  Zap,
+  Code,
+  ChevronDown,
+  ChevronUp,
+  Database,
+  FileText,
+  AlertCircle,
+  CheckCircle2
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { User } from '@supabase/supabase-js';
@@ -23,6 +30,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useVerracrossSync, DetectedChange } from '@/hooks/useVerracrossSync';
 import { useToast } from '@/hooks/use-toast';
 import { Update } from '@/components/dashboard/UpdateFeed';
+import { Badge } from '@/components/ui/badge';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 interface DashboardProps {
   user: User;
@@ -51,6 +61,8 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
     syncStatus, 
     changes, 
     portalData, 
+    rawSnapshots,
+    lastSyncResults,
     isLoading, 
     triggerSync,
     markAllAsRead,
@@ -59,6 +71,8 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
   } = useVerracrossSync(user.id);
   
   const { toast } = useToast();
+  const [showRawData, setShowRawData] = useState(false);
+  const [expandedSnapshot, setExpandedSnapshot] = useState<string | null>(null);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -97,6 +111,10 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
     isNew: !change.is_read,
   }));
 
+  // Get unread updates prominently
+  const unreadUpdates = updates.filter(u => u.isNew);
+  const readUpdates = updates.filter(u => !u.isNew);
+
   // Calculate stats from portal data
   const gradesData = portalData?.grades || { gpa: '--', grades: [] };
   const assignmentsData = portalData?.assignments || { pending: [] };
@@ -133,8 +151,8 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
             <div className="flex items-center gap-3">
               <OwlMascot size="sm" mood={unreadCount > 0 ? 'excited' : 'happy'} />
               <div>
-                <h1 className="text-xl font-bold text-foreground">Student Dashboard</h1>
-                <p className="text-sm text-muted-foreground">Your friendly study companion</p>
+                <h1 className="text-xl font-bold text-foreground">Veracross Dashboard</h1>
+                <p className="text-sm text-muted-foreground">SNS Student Portal</p>
               </div>
             </div>
 
@@ -166,8 +184,13 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
                 )}
               </Button>
               
-              <Button variant="ghost" size="icon">
-                <Settings className="w-5 h-5" />
+              <Button 
+                variant={showRawData ? "default" : "ghost"} 
+                size="icon"
+                onClick={() => setShowRawData(!showRawData)}
+                title="Toggle Raw Data View"
+              >
+                <Code className="w-5 h-5" />
               </Button>
               
               <Button variant="outline" size="sm" onClick={handleLogout} className="gap-2">
@@ -181,6 +204,47 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+        {/* Unread Updates Banner */}
+        {unreadCount > 0 && (
+          <section className="p-4 rounded-2xl bg-gradient-to-r from-lavender/20 to-peach/20 border-2 border-lavender/30 animate-pulse">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <span className="text-2xl">🔔</span>
+                <div>
+                  <h3 className="font-bold text-foreground">
+                    {unreadCount} New Update{unreadCount > 1 ? 's' : ''}!
+                  </h3>
+                  <p className="text-sm text-muted-foreground">
+                    You have updates you haven't seen yet
+                  </p>
+                </div>
+              </div>
+              <Button variant="lavender" size="sm" onClick={markAllAsRead}>
+                Mark all as read
+              </Button>
+            </div>
+            
+            {/* Quick preview of unread updates */}
+            <div className="mt-4 space-y-2">
+              {unreadUpdates.slice(0, 3).map(update => (
+                <div key={update.id} className="p-3 rounded-xl bg-card border flex items-start gap-3">
+                  <Badge variant="default" className="shrink-0">NEW</Badge>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-foreground truncate">{update.title}</p>
+                    <p className="text-sm text-muted-foreground truncate">{update.message}</p>
+                  </div>
+                  <span className="text-xs text-muted-foreground whitespace-nowrap">{update.timestamp}</span>
+                </div>
+              ))}
+              {unreadUpdates.length > 3 && (
+                <p className="text-sm text-center text-muted-foreground">
+                  +{unreadUpdates.length - 3} more updates below
+                </p>
+              )}
+            </div>
+          </section>
+        )}
+
         {/* Welcome Section */}
         <section className="flex flex-col sm:flex-row items-center gap-4 p-6 rounded-3xl gradient-hero border-2 border-border/30">
           <OwlMascot 
@@ -214,7 +278,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
             ) : (
               <>
                 <RefreshCw className="w-5 h-5" />
-                Sync from Verracross
+                Sync from Veracross
               </>
             )}
           </Button>
@@ -228,6 +292,180 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
           isRefreshing={isLoading}
           onRefresh={triggerSync}
         />
+
+        {/* Raw Data View (Collapsible) */}
+        {showRawData && (
+          <Card className="border-2 border-lavender/30">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Database className="w-5 h-5" />
+                Raw Scraped Data
+                <Badge variant="outline" className="ml-2">Debug View</Badge>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Tabs defaultValue="results" className="w-full">
+                <TabsList className="grid w-full grid-cols-3">
+                  <TabsTrigger value="results">Sync Results</TabsTrigger>
+                  <TabsTrigger value="snapshots">Page Snapshots</TabsTrigger>
+                  <TabsTrigger value="parsed">Parsed Data</TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="results" className="space-y-4">
+                  <p className="text-sm text-muted-foreground">
+                    Results from the last sync operation ({lastSyncResults.length} pages scraped)
+                  </p>
+                  <ScrollArea className="h-[400px] rounded-xl border p-4 bg-muted/30">
+                    {lastSyncResults.length > 0 ? (
+                      <div className="space-y-3">
+                        {lastSyncResults.map((result, idx) => (
+                          <div key={idx} className="p-3 rounded-lg bg-card border">
+                            <div className="flex items-center gap-2 mb-2">
+                              {result.error ? (
+                                <AlertCircle className="w-4 h-4 text-coral" />
+                              ) : (
+                                <CheckCircle2 className="w-4 h-4 text-mint" />
+                              )}
+                              <span className="font-medium">
+                                {result.type === 'portal' ? 'Student Portal' : result.courseName || `Course ${result.courseId}`}
+                              </span>
+                              {result.status && (
+                                <Badge variant={result.status === 200 ? 'default' : 'destructive'}>
+                                  HTTP {result.status}
+                                </Badge>
+                              )}
+                            </div>
+                            {result.url && (
+                              <p className="text-xs text-muted-foreground break-all mb-2">{result.url}</p>
+                            )}
+                            {result.error ? (
+                              <p className="text-sm text-coral">{result.error}</p>
+                            ) : (
+                              <div className="grid grid-cols-2 gap-2 text-xs">
+                                <div>Data: <span className="font-mono">{result.dataLength?.toLocaleString()} bytes</span></div>
+                                <div>Pages: <span className="font-mono">{result.pagesFound}</span></div>
+                                {result.announcementsFound !== undefined && (
+                                  <div>Announcements: <span className="font-mono">{result.announcementsFound}</span></div>
+                                )}
+                                {result.assignmentsFound !== undefined && (
+                                  <div>Assignments: <span className="font-mono">{result.assignmentsFound}</span></div>
+                                )}
+                                <div>Changes: <span className="font-mono">{result.changesDetected}</span></div>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-center text-muted-foreground py-8">
+                        No sync results yet. Click "Sync Now" to fetch data.
+                      </p>
+                    )}
+                  </ScrollArea>
+                </TabsContent>
+
+                <TabsContent value="snapshots" className="space-y-4">
+                  <p className="text-sm text-muted-foreground">
+                    Raw HTML snapshots stored from Veracross ({rawSnapshots.length} snapshots)
+                  </p>
+                  <ScrollArea className="h-[400px] rounded-xl border p-4 bg-muted/30">
+                    {rawSnapshots.length > 0 ? (
+                      <div className="space-y-3">
+                        {rawSnapshots.map((snapshot, idx) => (
+                          <div key={idx} className="rounded-lg bg-card border overflow-hidden">
+                            <button
+                              className="w-full p-3 flex items-center justify-between hover:bg-muted/50 transition-colors"
+                              onClick={() => setExpandedSnapshot(
+                                expandedSnapshot === `${snapshot.page_type}-${idx}` 
+                                  ? null 
+                                  : `${snapshot.page_type}-${idx}`
+                              )}
+                            >
+                              <div className="flex items-center gap-2">
+                                <FileText className="w-4 h-4" />
+                                <span className="font-medium capitalize">{snapshot.page_type}</span>
+                                <Badge variant="outline" className="text-xs">
+                                  {formatTimestamp(snapshot.captured_at)}
+                                </Badge>
+                              </div>
+                              {expandedSnapshot === `${snapshot.page_type}-${idx}` ? (
+                                <ChevronUp className="w-4 h-4" />
+                              ) : (
+                                <ChevronDown className="w-4 h-4" />
+                              )}
+                            </button>
+                            {expandedSnapshot === `${snapshot.page_type}-${idx}` && (
+                              <div className="p-3 border-t">
+                                <p className="text-xs text-muted-foreground mb-2">
+                                  Hash: {snapshot.content_hash}
+                                </p>
+                                {snapshot.raw_content && (
+                                  <pre className="text-xs bg-muted p-3 rounded-lg overflow-x-auto max-h-60 whitespace-pre-wrap">
+                                    {snapshot.raw_content.substring(0, 5000)}
+                                    {snapshot.raw_content.length > 5000 && '...\n[truncated]'}
+                                  </pre>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-center text-muted-foreground py-8">
+                        No snapshots yet. Click "Sync Now" to fetch data.
+                      </p>
+                    )}
+                  </ScrollArea>
+                </TabsContent>
+
+                <TabsContent value="parsed" className="space-y-4">
+                  <p className="text-sm text-muted-foreground">
+                    Parsed and extracted data from the scraped pages
+                  </p>
+                  <ScrollArea className="h-[400px] rounded-xl border p-4 bg-muted/30">
+                    {rawSnapshots.length > 0 ? (
+                      <div className="space-y-3">
+                        {rawSnapshots.map((snapshot, idx) => (
+                          <div key={idx} className="rounded-lg bg-card border overflow-hidden">
+                            <button
+                              className="w-full p-3 flex items-center justify-between hover:bg-muted/50 transition-colors"
+                              onClick={() => setExpandedSnapshot(
+                                expandedSnapshot === `parsed-${snapshot.page_type}-${idx}` 
+                                  ? null 
+                                  : `parsed-${snapshot.page_type}-${idx}`
+                              )}
+                            >
+                              <div className="flex items-center gap-2">
+                                <Code className="w-4 h-4" />
+                                <span className="font-medium capitalize">{snapshot.page_type}</span>
+                              </div>
+                              {expandedSnapshot === `parsed-${snapshot.page_type}-${idx}` ? (
+                                <ChevronUp className="w-4 h-4" />
+                              ) : (
+                                <ChevronDown className="w-4 h-4" />
+                              )}
+                            </button>
+                            {expandedSnapshot === `parsed-${snapshot.page_type}-${idx}` && (
+                              <div className="p-3 border-t">
+                                <pre className="text-xs bg-muted p-3 rounded-lg overflow-x-auto max-h-60">
+                                  {JSON.stringify(snapshot.parsed_data, null, 2)}
+                                </pre>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-center text-muted-foreground py-8">
+                        No parsed data yet. Click "Sync Now" to fetch data.
+                      </p>
+                    )}
+                  </ScrollArea>
+                </TabsContent>
+              </Tabs>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Dashboard Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -360,7 +598,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
             <div className="flex items-center justify-between">
               <CardTitle className="flex items-center gap-2">
                 <span className="text-xl">📬</span>
-                Recent Updates
+                All Updates
                 {syncStatus && (
                   <span className="text-sm font-normal text-muted-foreground">
                     ({syncStatus.successful_syncs} syncs completed)

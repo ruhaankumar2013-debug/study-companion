@@ -24,6 +24,28 @@ export interface DetectedChange {
   detected_at: string;
 }
 
+export interface SyncResult {
+  type: string;
+  url?: string;
+  courseId?: string;
+  courseName?: string;
+  status?: number;
+  dataLength?: number;
+  pagesFound?: number;
+  announcementsFound?: number;
+  assignmentsFound?: number;
+  changesDetected?: number;
+  error?: string;
+}
+
+export interface RawSnapshot {
+  page_type: string;
+  parsed_data: any;
+  raw_content: string | null;
+  captured_at: string;
+  content_hash: string;
+}
+
 export interface PortalData {
   grades: any;
   assignments: any;
@@ -37,6 +59,8 @@ export function useVerracrossSync(userId: string | null) {
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
   const [changes, setChanges] = useState<DetectedChange[]>([]);
   const [portalData, setPortalData] = useState<PortalData | null>(null);
+  const [rawSnapshots, setRawSnapshots] = useState<RawSnapshot[]>([]);
+  const [lastSyncResults, setLastSyncResults] = useState<SyncResult[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
 
@@ -68,6 +92,22 @@ export function useVerracrossSync(userId: string | null) {
 
     if (data) {
       setChanges(data as DetectedChange[]);
+    }
+  }, [userId]);
+
+  // Fetch raw snapshots (for debugging/display)
+  const fetchRawSnapshots = useCallback(async () => {
+    if (!userId) return;
+
+    const { data, error } = await supabase
+      .from('page_snapshots')
+      .select('page_type, parsed_data, raw_content, captured_at, content_hash')
+      .eq('user_id', userId)
+      .order('captured_at', { ascending: false })
+      .limit(20);
+
+    if (data) {
+      setRawSnapshots(data as RawSnapshot[]);
     }
   }, [userId]);
 
@@ -116,11 +156,16 @@ export function useVerracrossSync(userId: string | null) {
       const result = response.data;
 
       if (result.success) {
+        // Store sync results for display
+        if (result.syncResults) {
+          setLastSyncResults(result.syncResults);
+        }
+
         toast({
           title: result.changesFound > 0 ? `Found ${result.changesFound} new updates! 🎉` : 'All synced! ✓',
           description: result.changesFound > 0 
             ? 'Check your updates feed for details' 
-            : 'No new changes since last sync',
+            : `Scraped ${result.syncResults?.length || 0} pages`,
         });
 
         // Refresh all data
@@ -128,6 +173,7 @@ export function useVerracrossSync(userId: string | null) {
           fetchSyncStatus(),
           fetchChanges(),
           fetchPortalData(),
+          fetchRawSnapshots(),
         ]);
       } else {
         throw new Error(result.error || 'Sync failed');
@@ -142,7 +188,7 @@ export function useVerracrossSync(userId: string | null) {
     } finally {
       setIsLoading(false);
     }
-  }, [userId, toast, fetchSyncStatus, fetchChanges, fetchPortalData]);
+  }, [userId, toast, fetchSyncStatus, fetchChanges, fetchPortalData, fetchRawSnapshots]);
 
   // Mark change as read
   const markAsRead = useCallback(async (changeId: string) => {
@@ -191,8 +237,9 @@ export function useVerracrossSync(userId: string | null) {
       fetchSyncStatus();
       fetchChanges();
       fetchPortalData();
+      fetchRawSnapshots();
     }
-  }, [userId, fetchSyncStatus, fetchChanges, fetchPortalData]);
+  }, [userId, fetchSyncStatus, fetchChanges, fetchPortalData, fetchRawSnapshots]);
 
   // Subscribe to realtime changes
   useEffect(() => {
@@ -247,11 +294,14 @@ export function useVerracrossSync(userId: string | null) {
     syncStatus,
     changes,
     portalData,
+    rawSnapshots,
+    lastSyncResults,
     isLoading,
     triggerSync,
     markAsRead,
     markAllAsRead,
     deleteChange,
     unreadCount: changes.filter(c => !c.is_read).length,
+    refreshSnapshots: fetchRawSnapshots,
   };
 }
