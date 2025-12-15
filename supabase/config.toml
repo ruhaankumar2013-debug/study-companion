@@ -1,1 +1,10 @@
 project_id = "uonsmgzxkyqkhbuwcdcm"
+
+[functions.verracross-sync]
+verify_jwt = false
+
+[functions.scheduled-sync]
+verify_jwt = false
+
+[functions.send-notification-email]
+verify_jwt = false

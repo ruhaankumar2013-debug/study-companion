@@ -651,7 +651,7 @@ Deno.serve(async (req) => {
     // Update sync status to completed
     const { data: currentStatus } = await supabase
       .from('sync_status')
-      .select('total_syncs, successful_syncs')
+      .select('total_syncs, successful_syncs, notification_email')
       .eq('user_id', userId)
       .maybeSingle();
 
@@ -664,6 +664,31 @@ Deno.serve(async (req) => {
       total_syncs: (currentStatus?.total_syncs || 0) + 1,
       successful_syncs: (currentStatus?.successful_syncs || 0) + 1,
     }, { onConflict: 'user_id' });
+
+    // Send email notification if there are changes and email is configured
+    if (allChanges.length > 0 && currentStatus?.notification_email) {
+      try {
+        console.log('Sending email notification to:', currentStatus.notification_email);
+        const emailResponse = await fetch(`${supabaseUrl}/functions/v1/send-notification-email`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${supabaseKey}`,
+          },
+          body: JSON.stringify({
+            userId,
+            changes: allChanges.map(c => ({
+              title: c.title,
+              message: c.message || 'New update detected',
+              category: c.category,
+            })),
+          }),
+        });
+        console.log('Email notification response:', await emailResponse.text());
+      } catch (emailError) {
+        console.error('Failed to send email notification:', emailError);
+      }
+    }
 
     console.log(`Sync completed for user ${userId}. Scraped ${syncResults.length} pages, found ${allChanges.length} changes.`);
 
