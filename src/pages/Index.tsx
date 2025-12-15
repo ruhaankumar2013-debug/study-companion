@@ -1,13 +1,51 @@
-// Update this page (the content is just a fallback if you fail to update the page)
+import React, { useState } from 'react';
+import LoginForm from '@/components/auth/LoginForm';
+import Dashboard from '@/pages/Dashboard';
+import { useToast } from '@/hooks/use-toast';
 
 const Index = () => {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | undefined>();
+  const { toast } = useToast();
+
+  const handleLogin = (username: string, password: string) => {
+    setIsLoading(true);
+    setError(undefined);
+    
+    // Simulate login - in production this would connect to Verracross
+    setTimeout(() => {
+      setIsLoading(false);
+      if (username && password) {
+        setIsAuthenticated(true);
+        toast({
+          title: "Welcome back! 🦉",
+          description: "Successfully connected to your student portal",
+        });
+      } else {
+        setError("Please enter valid credentials");
+      }
+    }, 1500);
+  };
+
+  const handleLogout = () => {
+    setIsAuthenticated(false);
+    toast({
+      title: "Signed out 👋",
+      description: "See you next time!",
+    });
+  };
+
+  if (isAuthenticated) {
+    return <Dashboard onLogout={handleLogout} />;
+  }
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background">
-      <div className="text-center">
-        <h1 className="mb-4 text-4xl font-bold">Welcome to Your Blank App</h1>
-        <p className="text-xl text-muted-foreground">Start building your amazing project here!</p>
-      </div>
-    </div>
+    <LoginForm 
+      onLogin={handleLogin}
+      isLoading={isLoading}
+      error={error}
+    />
   );
 };
 
