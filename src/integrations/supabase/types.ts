@@ -14,7 +14,150 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      detected_changes: {
+        Row: {
+          category: Database["public"]["Enums"]["change_category"]
+          details: Json | null
+          detected_at: string
+          id: string
+          is_read: boolean
+          message: string
+          page_type: Database["public"]["Enums"]["portal_page_type"]
+          title: string
+          user_id: string
+        }
+        Insert: {
+          category: Database["public"]["Enums"]["change_category"]
+          details?: Json | null
+          detected_at?: string
+          id?: string
+          is_read?: boolean
+          message: string
+          page_type: Database["public"]["Enums"]["portal_page_type"]
+          title: string
+          user_id: string
+        }
+        Update: {
+          category?: Database["public"]["Enums"]["change_category"]
+          details?: Json | null
+          detected_at?: string
+          id?: string
+          is_read?: boolean
+          message?: string
+          page_type?: Database["public"]["Enums"]["portal_page_type"]
+          title?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      page_snapshots: {
+        Row: {
+          captured_at: string
+          content_hash: string
+          id: string
+          page_type: Database["public"]["Enums"]["portal_page_type"]
+          parsed_data: Json | null
+          raw_content: string | null
+          user_id: string
+        }
+        Insert: {
+          captured_at?: string
+          content_hash: string
+          id?: string
+          page_type: Database["public"]["Enums"]["portal_page_type"]
+          parsed_data?: Json | null
+          raw_content?: string | null
+          user_id: string
+        }
+        Update: {
+          captured_at?: string
+          content_hash?: string
+          id?: string
+          page_type?: Database["public"]["Enums"]["portal_page_type"]
+          parsed_data?: Json | null
+          raw_content?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      sync_status: {
+        Row: {
+          failed_syncs: number
+          id: string
+          is_syncing: boolean
+          last_sync_completed: string | null
+          last_sync_error: string | null
+          last_sync_started: string | null
+          next_scheduled_sync: string | null
+          successful_syncs: number
+          total_syncs: number
+          user_id: string
+        }
+        Insert: {
+          failed_syncs?: number
+          id?: string
+          is_syncing?: boolean
+          last_sync_completed?: string | null
+          last_sync_error?: string | null
+          last_sync_started?: string | null
+          next_scheduled_sync?: string | null
+          successful_syncs?: number
+          total_syncs?: number
+          user_id: string
+        }
+        Update: {
+          failed_syncs?: number
+          id?: string
+          is_syncing?: boolean
+          last_sync_completed?: string | null
+          last_sync_error?: string | null
+          last_sync_started?: string | null
+          next_scheduled_sync?: string | null
+          successful_syncs?: number
+          total_syncs?: number
+          user_id?: string
+        }
+        Relationships: []
+      }
+      user_credentials: {
+        Row: {
+          created_at: string
+          encrypted_password: string
+          id: string
+          is_active: boolean
+          last_login_attempt: string | null
+          last_successful_login: string | null
+          portal_url: string
+          updated_at: string
+          user_id: string
+          username: string
+        }
+        Insert: {
+          created_at?: string
+          encrypted_password: string
+          id?: string
+          is_active?: boolean
+          last_login_attempt?: string | null
+          last_successful_login?: string | null
+          portal_url?: string
+          updated_at?: string
+          user_id: string
+          username: string
+        }
+        Update: {
+          created_at?: string
+          encrypted_password?: string
+          id?: string
+          is_active?: boolean
+          last_login_attempt?: string | null
+          last_successful_login?: string | null
+          portal_url?: string
+          updated_at?: string
+          user_id?: string
+          username?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
@@ -23,7 +166,27 @@ export type Database = {
       [_ in never]: never
     }
     Enums: {
-      [_ in never]: never
+      change_category:
+        | "grade_posted"
+        | "grade_updated"
+        | "assignment_added"
+        | "assignment_updated"
+        | "assignment_due_changed"
+        | "announcement_added"
+        | "attendance_recorded"
+        | "attendance_updated"
+        | "billing_item_added"
+        | "billing_payment_received"
+        | "calendar_event_added"
+        | "calendar_event_removed"
+        | "calendar_event_updated"
+      portal_page_type:
+        | "grades"
+        | "assignments"
+        | "announcements"
+        | "attendance"
+        | "billing"
+        | "calendar"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -150,6 +313,30 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      change_category: [
+        "grade_posted",
+        "grade_updated",
+        "assignment_added",
+        "assignment_updated",
+        "assignment_due_changed",
+        "announcement_added",
+        "attendance_recorded",
+        "attendance_updated",
+        "billing_item_added",
+        "billing_payment_received",
+        "calendar_event_added",
+        "calendar_event_removed",
+        "calendar_event_updated",
+      ],
+      portal_page_type: [
+        "grades",
+        "assignments",
+        "announcements",
+        "attendance",
+        "billing",
+        "calendar",
+      ],
+    },
   },
 } as const

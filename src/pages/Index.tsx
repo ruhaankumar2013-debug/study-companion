@@ -1,52 +1,52 @@
-import React, { useState } from 'react';
-import LoginForm from '@/components/auth/LoginForm';
+import React, { useState, useEffect } from 'react';
+import { supabase } from '@/integrations/supabase/client';
+import { User } from '@supabase/supabase-js';
+import AuthPage from '@/pages/AuthPage';
 import Dashboard from '@/pages/Dashboard';
-import { useToast } from '@/hooks/use-toast';
 
 const Index = () => {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | undefined>();
-  const { toast } = useToast();
+  const [user, setUser] = useState<User | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const handleLogin = (username: string, password: string) => {
-    setIsLoading(true);
-    setError(undefined);
-    
-    // Simulate login - in production this would connect to Verracross
-    setTimeout(() => {
+  useEffect(() => {
+    // Check current session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
       setIsLoading(false);
-      if (username && password) {
-        setIsAuthenticated(true);
-        toast({
-          title: "Welcome back! 🦉",
-          description: "Successfully connected to your student portal",
-        });
-      } else {
-        setError("Please enter valid credentials");
-      }
-    }, 1500);
+    });
+
+    // Listen for auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      setUser(session?.user ?? null);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const handleAuthSuccess = () => {
+    // User state will be updated by onAuthStateChange
   };
 
   const handleLogout = () => {
-    setIsAuthenticated(false);
-    toast({
-      title: "Signed out 👋",
-      description: "See you next time!",
-    });
+    setUser(null);
   };
 
-  if (isAuthenticated) {
-    return <Dashboard onLogout={handleLogout} />;
+  if (isLoading) {
+    return (
+      <div className="min-h-screen gradient-hero flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-bounce text-6xl mb-4">🦉</div>
+          <p className="text-muted-foreground font-medium">Loading your dashboard...</p>
+        </div>
+      </div>
+    );
   }
 
-  return (
-    <LoginForm 
-      onLogin={handleLogin}
-      isLoading={isLoading}
-      error={error}
-    />
-  );
+  if (!user) {
+    return <AuthPage onAuthSuccess={handleAuthSuccess} />;
+  }
+
+  return <Dashboard user={user} onLogout={handleLogout} />;
 };
 
 export default Index;

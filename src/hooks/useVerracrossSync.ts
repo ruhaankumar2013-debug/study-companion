@@ -1,0 +1,257 @@
+import { useState, useEffect, useCallback } from 'react';
+import { supabase } from '@/integrations/supabase/client';
+import { useToast } from '@/hooks/use-toast';
+
+export interface SyncStatus {
+  is_syncing: boolean;
+  last_sync_started: string | null;
+  last_sync_completed: string | null;
+  last_sync_error: string | null;
+  next_scheduled_sync: string | null;
+  total_syncs: number;
+  successful_syncs: number;
+  failed_syncs: number;
+}
+
+export interface DetectedChange {
+  id: string;
+  page_type: string;
+  category: string;
+  title: string;
+  message: string;
+  details: any;
+  is_read: boolean;
+  detected_at: string;
+}
+
+export interface PortalData {
+  grades: any;
+  assignments: any;
+  announcements: any;
+  attendance: any;
+  billing: any;
+  calendar: any;
+}
+
+export function useVerracrossSync(userId: string | null) {
+  const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
+  const [changes, setChanges] = useState<DetectedChange[]>([]);
+  const [portalData, setPortalData] = useState<PortalData | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const { toast } = useToast();
+
+  // Fetch sync status
+  const fetchSyncStatus = useCallback(async () => {
+    if (!userId) return;
+
+    const { data, error } = await supabase
+      .from('sync_status')
+      .select('*')
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (data) {
+      setSyncStatus(data as SyncStatus);
+    }
+  }, [userId]);
+
+  // Fetch detected changes
+  const fetchChanges = useCallback(async () => {
+    if (!userId) return;
+
+    const { data, error } = await supabase
+      .from('detected_changes')
+      .select('*')
+      .eq('user_id', userId)
+      .order('detected_at', { ascending: false })
+      .limit(50);
+
+    if (data) {
+      setChanges(data as DetectedChange[]);
+    }
+  }, [userId]);
+
+  // Fetch latest portal data from snapshots
+  const fetchPortalData = useCallback(async () => {
+    if (!userId) return;
+
+    const pageTypes = ['grades', 'assignments', 'announcements', 'attendance', 'billing', 'calendar'] as const;
+    const data: any = {};
+
+    for (const pageType of pageTypes) {
+      const { data: snapshot } = await supabase
+        .from('page_snapshots')
+        .select('parsed_data')
+        .eq('user_id', userId)
+        .eq('page_type', pageType)
+        .order('captured_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (snapshot?.parsed_data) {
+        data[pageType] = snapshot.parsed_data;
+      }
+    }
+
+    setPortalData(data);
+  }, [userId]);
+
+  // Trigger manual sync
+  const triggerSync = useCallback(async () => {
+    if (!userId) return;
+
+    setIsLoading(true);
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      const response = await supabase.functions.invoke('verracross-sync', {
+        body: { action: 'manual_sync' },
+      });
+
+      if (response.error) {
+        throw new Error(response.error.message);
+      }
+
+      const result = response.data;
+
+      if (result.success) {
+        toast({
+          title: result.changesFound > 0 ? `Found ${result.changesFound} new updates! 🎉` : 'All synced! ✓',
+          description: result.changesFound > 0 
+            ? 'Check your updates feed for details' 
+            : 'No new changes since last sync',
+        });
+
+        // Refresh all data
+        await Promise.all([
+          fetchSyncStatus(),
+          fetchChanges(),
+          fetchPortalData(),
+        ]);
+      } else {
+        throw new Error(result.error || 'Sync failed');
+      }
+    } catch (error) {
+      console.error('Sync error:', error);
+      toast({
+        title: 'Sync failed',
+        description: error instanceof Error ? error.message : 'Please try again later',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  }, [userId, toast, fetchSyncStatus, fetchChanges, fetchPortalData]);
+
+  // Mark change as read
+  const markAsRead = useCallback(async (changeId: string) => {
+    const { error } = await supabase
+      .from('detected_changes')
+      .update({ is_read: true })
+      .eq('id', changeId);
+
+    if (!error) {
+      setChanges(prev => prev.map(c => 
+        c.id === changeId ? { ...c, is_read: true } : c
+      ));
+    }
+  }, []);
+
+  // Mark all as read
+  const markAllAsRead = useCallback(async () => {
+    if (!userId) return;
+
+    const { error } = await supabase
+      .from('detected_changes')
+      .update({ is_read: true })
+      .eq('user_id', userId)
+      .eq('is_read', false);
+
+    if (!error) {
+      setChanges(prev => prev.map(c => ({ ...c, is_read: true })));
+    }
+  }, [userId]);
+
+  // Delete a change
+  const deleteChange = useCallback(async (changeId: string) => {
+    const { error } = await supabase
+      .from('detected_changes')
+      .delete()
+      .eq('id', changeId);
+
+    if (!error) {
+      setChanges(prev => prev.filter(c => c.id !== changeId));
+    }
+  }, []);
+
+  // Initial data fetch
+  useEffect(() => {
+    if (userId) {
+      fetchSyncStatus();
+      fetchChanges();
+      fetchPortalData();
+    }
+  }, [userId, fetchSyncStatus, fetchChanges, fetchPortalData]);
+
+  // Subscribe to realtime changes
+  useEffect(() => {
+    if (!userId) return;
+
+    const changesChannel = supabase
+      .channel('detected_changes')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'detected_changes',
+          filter: `user_id=eq.${userId}`,
+        },
+        (payload) => {
+          console.log('New change detected:', payload);
+          setChanges(prev => [payload.new as DetectedChange, ...prev]);
+          
+          toast({
+            title: (payload.new as DetectedChange).title,
+            description: (payload.new as DetectedChange).message,
+          });
+        }
+      )
+      .subscribe();
+
+    const syncChannel = supabase
+      .channel('sync_status')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'sync_status',
+          filter: `user_id=eq.${userId}`,
+        },
+        (payload) => {
+          console.log('Sync status updated:', payload);
+          setSyncStatus(payload.new as SyncStatus);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(changesChannel);
+      supabase.removeChannel(syncChannel);
+    };
+  }, [userId, toast]);
+
+  return {
+    syncStatus,
+    changes,
+    portalData,
+    isLoading,
+    triggerSync,
+    markAsRead,
+    markAllAsRead,
+    deleteChange,
+    unreadCount: changes.filter(c => !c.is_read).length,
+  };
+}
