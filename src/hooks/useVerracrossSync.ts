@@ -11,6 +11,8 @@ export interface SyncStatus {
   total_syncs: number;
   successful_syncs: number;
   failed_syncs: number;
+  notification_email: string | null;
+  auto_sync_enabled: boolean;
 }
 
 export interface DetectedChange {
@@ -75,7 +77,19 @@ export function useVerracrossSync(userId: string | null) {
       .maybeSingle();
 
     if (data) {
-      setSyncStatus(data as SyncStatus);
+      const syncData = data as any;
+      setSyncStatus({
+        is_syncing: syncData.is_syncing,
+        last_sync_started: syncData.last_sync_started,
+        last_sync_completed: syncData.last_sync_completed,
+        last_sync_error: syncData.last_sync_error,
+        next_scheduled_sync: syncData.next_scheduled_sync,
+        total_syncs: syncData.total_syncs,
+        successful_syncs: syncData.successful_syncs,
+        failed_syncs: syncData.failed_syncs,
+        notification_email: syncData.notification_email ?? null,
+        auto_sync_enabled: syncData.auto_sync_enabled ?? true,
+      });
     }
   }, [userId]);
 
@@ -219,7 +233,41 @@ export function useVerracrossSync(userId: string | null) {
     }
   }, [userId]);
 
-  // Delete a change
+  // Update notification email
+  const updateNotificationEmail = useCallback(async (email: string) => {
+    if (!userId) return;
+
+    const { error } = await supabase
+      .from('sync_status')
+      .upsert({
+        user_id: userId,
+        notification_email: email || null,
+      }, { onConflict: 'user_id' });
+
+    if (!error) {
+      setSyncStatus(prev => prev ? { ...prev, notification_email: email || null } : null);
+      return true;
+    }
+    return false;
+  }, [userId]);
+
+  // Toggle auto sync
+  const toggleAutoSync = useCallback(async (enabled: boolean) => {
+    if (!userId) return;
+
+    const { error } = await supabase
+      .from('sync_status')
+      .upsert({
+        user_id: userId,
+        auto_sync_enabled: enabled,
+      }, { onConflict: 'user_id' });
+
+    if (!error) {
+      setSyncStatus(prev => prev ? { ...prev, auto_sync_enabled: enabled } : null);
+      return true;
+    }
+    return false;
+  }, [userId]);
   const deleteChange = useCallback(async (changeId: string) => {
     const { error } = await supabase
       .from('detected_changes')
@@ -301,6 +349,8 @@ export function useVerracrossSync(userId: string | null) {
     markAsRead,
     markAllAsRead,
     deleteChange,
+    updateNotificationEmail,
+    toggleAutoSync,
     unreadCount: changes.filter(c => !c.is_read).length,
     refreshSnapshots: fetchRawSnapshots,
   };

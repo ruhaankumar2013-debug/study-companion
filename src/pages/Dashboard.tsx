@@ -17,7 +17,9 @@ import {
   Database,
   FileText,
   AlertCircle,
-  CheckCircle2
+  CheckCircle2,
+  Mail,
+  Power
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { User } from '@supabase/supabase-js';
@@ -33,6 +35,8 @@ import { Update } from '@/components/dashboard/UpdateFeed';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
 
 interface DashboardProps {
   user: User;
@@ -67,16 +71,48 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
     triggerSync,
     markAllAsRead,
     deleteChange,
+    updateNotificationEmail,
+    toggleAutoSync,
     unreadCount 
   } = useVerracrossSync(user.id);
   
   const { toast } = useToast();
   const [showRawData, setShowRawData] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [expandedSnapshot, setExpandedSnapshot] = useState<string | null>(null);
+  const [emailInput, setEmailInput] = useState(syncStatus?.notification_email || '');
+  const [isSavingEmail, setIsSavingEmail] = useState(false);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
     onLogout();
+  };
+
+  const handleSaveEmail = async () => {
+    setIsSavingEmail(true);
+    const success = await updateNotificationEmail(emailInput);
+    setIsSavingEmail(false);
+    if (success) {
+      toast({
+        title: emailInput ? 'Email notifications enabled! 📧' : 'Email notifications disabled',
+        description: emailInput ? `Updates will be sent to ${emailInput}` : 'You will no longer receive email notifications',
+      });
+    } else {
+      toast({
+        title: 'Failed to save email',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleToggleAutoSync = async (enabled: boolean) => {
+    const success = await toggleAutoSync(enabled);
+    if (success) {
+      toast({
+        title: enabled ? 'Auto-sync enabled ✓' : 'Auto-sync disabled',
+        description: enabled ? 'Checking for updates every 15 minutes' : 'Automatic checking is paused',
+      });
+    }
   };
 
   const getGreeting = () => {
@@ -185,6 +221,15 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
               </Button>
               
               <Button 
+                variant={showSettings ? "default" : "ghost"} 
+                size="icon"
+                onClick={() => setShowSettings(!showSettings)}
+                title="Settings"
+              >
+                <Settings className="w-5 h-5" />
+              </Button>
+
+              <Button 
                 variant={showRawData ? "default" : "ghost"} 
                 size="icon"
                 onClick={() => setShowRawData(!showRawData)}
@@ -292,6 +337,80 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
           isRefreshing={isLoading}
           onRefresh={triggerSync}
         />
+
+        {/* Settings Panel */}
+        {showSettings && (
+          <Card className="border-2 border-mint/30">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Settings className="w-5 h-5" />
+                Notification Settings
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {/* Auto Sync Toggle */}
+              <div className="flex items-center justify-between p-4 rounded-xl bg-muted/30 border">
+                <div className="flex items-center gap-3">
+                  <Power className="w-5 h-5 text-mint" />
+                  <div>
+                    <p className="font-medium">Auto-Sync (Every 15 min)</p>
+                    <p className="text-sm text-muted-foreground">
+                      Automatically check Veracross for updates
+                    </p>
+                  </div>
+                </div>
+                <Switch
+                  checked={syncStatus?.auto_sync_enabled ?? true}
+                  onCheckedChange={handleToggleAutoSync}
+                />
+              </div>
+
+              {/* Email Notifications */}
+              <div className="p-4 rounded-xl bg-muted/30 border space-y-4">
+                <div className="flex items-center gap-3">
+                  <Mail className="w-5 h-5 text-lavender" />
+                  <div>
+                    <p className="font-medium">Email Notifications</p>
+                    <p className="text-sm text-muted-foreground">
+                      Get notified when new updates are detected
+                    </p>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <Input
+                    type="email"
+                    placeholder="your@email.com"
+                    value={emailInput}
+                    onChange={(e) => setEmailInput(e.target.value)}
+                    className="flex-1"
+                  />
+                  <Button 
+                    onClick={handleSaveEmail}
+                    disabled={isSavingEmail}
+                    variant="lavender"
+                  >
+                    {isSavingEmail ? 'Saving...' : 'Save'}
+                  </Button>
+                </div>
+                {syncStatus?.notification_email && (
+                  <p className="text-sm text-mint flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4" />
+                    Notifications enabled for {syncStatus.notification_email}
+                  </p>
+                )}
+              </div>
+
+              {/* Status Info */}
+              <div className="text-sm text-muted-foreground space-y-1">
+                <p>Total syncs: {syncStatus?.total_syncs || 0}</p>
+                <p>Successful: {syncStatus?.successful_syncs || 0}</p>
+                {syncStatus?.auto_sync_enabled && syncStatus?.next_scheduled_sync && (
+                  <p>Next auto-sync: {nextSyncTime}</p>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Raw Data View (Collapsible) */}
         {showRawData && (
