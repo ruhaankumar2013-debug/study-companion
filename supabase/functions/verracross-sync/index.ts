@@ -13,6 +13,9 @@ interface SyncRequest {
 // Veracross URLs to scrape
 const VERACROSS_URLS = {
   portal: 'https://portals.veracross.com/sns/student',
+  overview: 'https://portals.veracross.com/sns/student/student/overview',
+  attendance: 'https://documents.veracross.com/sns/attendance/153227?grading_period=4&key=_',
+  reportCard: 'https://documents.veracross.com/sns/report_card/85267?grading_period=2&pad=104784',
   courses: [
     { id: '17681', name: 'Course 1', baseUrl: 'https://classes.veracross.com/sns/course/17681/website' },
     { id: '17682', name: 'Course 2', baseUrl: 'https://classes.veracross.com/sns/course/17682/website' },
@@ -394,6 +397,171 @@ Deno.serve(async (req) => {
       syncResults.push({
         type: 'portal',
         url: VERACROSS_URLS.portal,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+
+    // Scrape student overview page
+    try {
+      console.log('Scraping student overview...');
+      const { html, status } = await fetchPage(VERACROSS_URLS.overview, cookies);
+      
+      const overviewData = parsePortalContent(html);
+      overviewData.source = 'overview';
+      const contentHash = simpleHash(JSON.stringify(overviewData));
+      
+      syncResults.push({
+        type: 'overview',
+        url: VERACROSS_URLS.overview,
+        status,
+        dataLength: html.length,
+        pagesFound: 0,
+        changesDetected: 0
+      });
+    } catch (error) {
+      console.error('Error scraping overview:', error);
+      syncResults.push({
+        type: 'overview',
+        url: VERACROSS_URLS.overview,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+
+    // Scrape attendance document
+    try {
+      console.log('Scraping attendance...');
+      const { html, status } = await fetchPage(VERACROSS_URLS.attendance, cookies);
+      
+      const attendanceData = {
+        source: 'attendance_doc',
+        rawLength: html.length,
+        content: html.substring(0, 10000),
+      };
+      const contentHash = simpleHash(JSON.stringify(attendanceData));
+      
+      // Get existing snapshot
+      const { data: existingSnapshot } = await supabase
+        .from('page_snapshots')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('page_type', 'attendance')
+        .order('captured_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      // Check if content changed
+      if (!existingSnapshot || existingSnapshot.content_hash !== contentHash) {
+        await supabase.from('page_snapshots').insert({
+          user_id: userId,
+          page_type: 'attendance',
+          content_hash: contentHash,
+          parsed_data: attendanceData,
+          raw_content: html.substring(0, 50000),
+          captured_at: new Date().toISOString(),
+        });
+
+        if (existingSnapshot) {
+          await supabase.from('detected_changes').insert({
+            user_id: userId,
+            page_type: 'attendance',
+            category: 'attendance_updated',
+            title: 'Attendance Record Updated',
+            message: 'Your attendance information has been updated',
+            details: { source: 'attendance_doc' },
+            is_read: false,
+            detected_at: new Date().toISOString(),
+          });
+          allChanges.push({ category: 'attendance_updated', title: 'Attendance Updated' });
+        }
+      }
+
+      syncResults.push({
+        type: 'attendance',
+        url: VERACROSS_URLS.attendance,
+        status,
+        dataLength: html.length,
+        pagesFound: 0,
+        changesDetected: existingSnapshot && existingSnapshot.content_hash !== contentHash ? 1 : 0
+      });
+    } catch (error) {
+      console.error('Error scraping attendance:', error);
+      syncResults.push({
+        type: 'attendance',
+        url: VERACROSS_URLS.attendance,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+
+    // Scrape report card document
+    try {
+      console.log('Scraping report card...');
+      const { html, status } = await fetchPage(VERACROSS_URLS.reportCard, cookies);
+      
+      const reportCardData = {
+        source: 'report_card',
+        rawLength: html.length,
+        content: html.substring(0, 10000),
+      };
+      const contentHash = simpleHash(JSON.stringify(reportCardData));
+      
+      // Get existing snapshot
+      const { data: existingSnapshot } = await supabase
+        .from('page_snapshots')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('page_type', 'grades')
+        .eq('content_hash', contentHash)
+        .maybeSingle();
+
+      // Check if content changed - save as grades since it's grade-related
+      if (!existingSnapshot) {
+        await supabase.from('page_snapshots').insert({
+          user_id: userId,
+          page_type: 'grades',
+          content_hash: contentHash,
+          parsed_data: reportCardData,
+          raw_content: html.substring(0, 50000),
+          captured_at: new Date().toISOString(),
+        });
+
+        // Check if there was a previous report card
+        const { data: anyPrevious } = await supabase
+          .from('page_snapshots')
+          .select('id')
+          .eq('user_id', userId)
+          .eq('page_type', 'grades')
+          .neq('content_hash', contentHash)
+          .limit(1)
+          .maybeSingle();
+
+        if (anyPrevious) {
+          await supabase.from('detected_changes').insert({
+            user_id: userId,
+            page_type: 'grades',
+            category: 'grade_updated',
+            title: 'Report Card Updated',
+            message: 'Your report card has been updated with new information',
+            details: { source: 'report_card' },
+            is_read: false,
+            detected_at: new Date().toISOString(),
+          });
+          allChanges.push({ category: 'grade_updated', title: 'Report Card Updated' });
+        }
+      }
+
+      syncResults.push({
+        type: 'report_card',
+        url: VERACROSS_URLS.reportCard,
+        status,
+        dataLength: html.length,
+        pagesFound: 0,
+        changesDetected: 0
+      });
+    } catch (error) {
+      console.error('Error scraping report card:', error);
+      syncResults.push({
+        type: 'report_card',
+        url: VERACROSS_URLS.reportCard,
         error: error instanceof Error ? error.message : 'Unknown error'
       });
     }
