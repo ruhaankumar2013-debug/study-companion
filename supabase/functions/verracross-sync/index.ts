@@ -457,19 +457,7 @@ Deno.serve(async (req) => {
           captured_at: new Date().toISOString(),
         });
 
-        if (existingSnapshot) {
-          await supabase.from('detected_changes').insert({
-            user_id: userId,
-            page_type: 'attendance',
-            category: 'attendance_updated',
-            title: 'Attendance Record Updated',
-            message: 'Your attendance information has been updated',
-            details: { source: 'attendance_doc' },
-            is_read: false,
-            detected_at: new Date().toISOString(),
-          });
-          allChanges.push({ category: 'attendance_updated', title: 'Attendance Updated' });
-        }
+        // Don't create change notifications for attendance - just save snapshot
       }
 
       syncResults.push({
@@ -521,29 +509,7 @@ Deno.serve(async (req) => {
           captured_at: new Date().toISOString(),
         });
 
-        // Check if there was a previous report card
-        const { data: anyPrevious } = await supabase
-          .from('page_snapshots')
-          .select('id')
-          .eq('user_id', userId)
-          .eq('page_type', 'grades')
-          .neq('content_hash', contentHash)
-          .limit(1)
-          .maybeSingle();
-
-        if (anyPrevious) {
-          await supabase.from('detected_changes').insert({
-            user_id: userId,
-            page_type: 'grades',
-            category: 'grade_updated',
-            title: 'Report Card Updated',
-            message: 'Your report card has been updated with new information',
-            details: { source: 'report_card' },
-            is_read: false,
-            detected_at: new Date().toISOString(),
-          });
-          allChanges.push({ category: 'grade_updated', title: 'Report Card Updated' });
-        }
+        // Don't create change notifications for report card - just save snapshot
       }
 
       syncResults.push({
