@@ -82,6 +82,7 @@ export type Database = {
       }
       sync_status: {
         Row: {
+          auto_sync_enabled: boolean
           failed_syncs: number
           id: string
           is_syncing: boolean
@@ -89,11 +90,13 @@ export type Database = {
           last_sync_error: string | null
           last_sync_started: string | null
           next_scheduled_sync: string | null
+          notification_email: string | null
           successful_syncs: number
           total_syncs: number
           user_id: string
         }
         Insert: {
+          auto_sync_enabled?: boolean
           failed_syncs?: number
           id?: string
           is_syncing?: boolean
@@ -101,11 +104,13 @@ export type Database = {
           last_sync_error?: string | null
           last_sync_started?: string | null
           next_scheduled_sync?: string | null
+          notification_email?: string | null
           successful_syncs?: number
           total_syncs?: number
           user_id: string
         }
         Update: {
+          auto_sync_enabled?: boolean
           failed_syncs?: number
           id?: string
           is_syncing?: boolean
@@ -113,6 +118,7 @@ export type Database = {
           last_sync_error?: string | null
           last_sync_started?: string | null
           next_scheduled_sync?: string | null
+          notification_email?: string | null
           successful_syncs?: number
           total_syncs?: number
           user_id?: string
