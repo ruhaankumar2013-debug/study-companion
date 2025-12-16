@@ -191,7 +191,17 @@ function parsePortalContent(html: string): any {
   return content;
 }
 
-// Compare two snapshots and detect changes
+// Check if text contains meaningful English content (at least 3 words)
+function hasMeaningfulContent(text: string): boolean {
+  if (!text || typeof text !== 'string') return false;
+  // Remove HTML tags and special characters
+  const cleanText = text.replace(/<[^>]+>/g, ' ').replace(/[^a-zA-Z\s]/g, ' ').trim();
+  // Split into words and filter out very short ones
+  const words = cleanText.split(/\s+/).filter(w => w.length >= 2);
+  return words.length >= 3;
+}
+
+// Compare two snapshots and detect changes - only meaningful content
 function detectChanges(
   pageType: string, 
   oldData: any, 
@@ -200,82 +210,69 @@ function detectChanges(
   const changes: { category: string; title: string; message: string; details: any }[] = [];
   
   if (!oldData) {
-    // First sync - report initial data found
-    if (newData.pages?.length > 0) {
+    // First sync - only report if there's actual meaningful content
+    const pagesWithContent = (newData.pages || []).filter((p: any) => hasMeaningfulContent(p.text));
+    if (pagesWithContent.length > 0) {
       changes.push({
         category: 'announcement_added',
         title: 'Initial Sync Complete 🎉',
-        message: `Found ${newData.pages.length} pages in ${pageType}`,
-        details: { pageCount: newData.pages.length, type: 'initial_sync' }
+        message: `Found ${pagesWithContent.length} pages with content`,
+        details: { pageCount: pagesWithContent.length, type: 'initial_sync' }
       });
     }
     return changes;
   }
 
-  // Compare content hashes
-  const oldHash = simpleHash(JSON.stringify(oldData));
-  const newHash = simpleHash(JSON.stringify(newData));
+  // Compare content - look for actual text changes, not byte differences
+  const oldPages = oldData.pages || [];
+  const newPages = newData.pages || [];
   
-  if (oldHash !== newHash) {
-    // Content changed - analyze what changed
-    const oldPages = oldData.pages || [];
-    const newPages = newData.pages || [];
-    
-    // Check for new pages
-    for (const newPage of newPages) {
-      const exists = oldPages.find((p: any) => p.text === newPage.text && p.url === newPage.url);
-      if (!exists && newPage.text) {
-        changes.push({
-          category: 'assignment_added',
-          title: 'New Content Detected',
-          message: newPage.text.substring(0, 100),
-          details: newPage
-        });
-      }
-    }
-    
-    // Check for new announcements
-    const oldAnnouncements = oldData.announcements || [];
-    const newAnnouncements = newData.announcements || [];
-    
-    for (const newAnn of newAnnouncements) {
-      const exists = oldAnnouncements.find((a: any) => a.text === newAnn.text);
-      if (!exists && newAnn.text) {
-        changes.push({
-          category: 'announcement_added',
-          title: 'New Announcement 📢',
-          message: newAnn.text.substring(0, 150),
-          details: newAnn
-        });
-      }
-    }
-    
-    // Check for new assignments
-    const oldAssignments = oldData.assignments || [];
-    const newAssignments = newData.assignments || [];
-    
-    for (const newAssign of newAssignments) {
-      const exists = oldAssignments.find((a: any) => a.raw === newAssign.raw);
-      if (!exists) {
-        changes.push({
-          category: 'assignment_added',
-          title: 'New Assignment',
-          message: 'New assignment content detected',
-          details: newAssign
-        });
-      }
-    }
-    
-    // If content changed but we couldn't identify specific changes
-    if (changes.length === 0 && oldData.rawLength !== newData.rawLength) {
+  // Check for new pages with meaningful content
+  for (const newPage of newPages) {
+    const exists = oldPages.find((p: any) => p.text === newPage.text && p.url === newPage.url);
+    if (!exists && newPage.text && hasMeaningfulContent(newPage.text)) {
       changes.push({
-        category: 'assignment_updated',
-        title: 'Page Updated',
-        message: `Content changed (${oldData.rawLength} → ${newData.rawLength} bytes)`,
-        details: { oldLength: oldData.rawLength, newLength: newData.rawLength }
+        category: 'assignment_added',
+        title: 'New Content Added',
+        message: newPage.text.substring(0, 100),
+        details: newPage
       });
     }
   }
+  
+  // Check for new announcements with meaningful content
+  const oldAnnouncements = oldData.announcements || [];
+  const newAnnouncements = newData.announcements || [];
+  
+  for (const newAnn of newAnnouncements) {
+    const exists = oldAnnouncements.find((a: any) => a.text === newAnn.text);
+    if (!exists && newAnn.text && hasMeaningfulContent(newAnn.text)) {
+      changes.push({
+        category: 'announcement_added',
+        title: 'New Announcement 📢',
+        message: newAnn.text.substring(0, 150),
+        details: newAnn
+      });
+    }
+  }
+  
+  // Check for new assignments with meaningful content
+  const oldAssignments = oldData.assignments || [];
+  const newAssignments = newData.assignments || [];
+  
+  for (const newAssign of newAssignments) {
+    const exists = oldAssignments.find((a: any) => a.raw === newAssign.raw);
+    if (!exists && newAssign.raw && hasMeaningfulContent(newAssign.raw)) {
+      changes.push({
+        category: 'assignment_added',
+        title: 'New Assignment',
+        message: 'New assignment content detected',
+        details: newAssign
+      });
+    }
+  }
+  
+  // NO longer report generic byte-size changes - only specific content changes matter
   
   return changes;
 }
