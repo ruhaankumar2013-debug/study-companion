@@ -145,6 +145,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
     message: change.message,
     timestamp: formatTimestamp(change.detected_at),
     isNew: !change.is_read,
+    details: change.details as Record<string, any> | undefined,
   }));
 
   // Get unread updates prominently

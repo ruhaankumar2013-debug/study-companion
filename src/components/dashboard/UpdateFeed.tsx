@@ -8,6 +8,7 @@ export interface Update {
   message: string;
   timestamp: string;
   isNew: boolean;
+  details?: Record<string, any>;
 }
 
 interface UpdateFeedProps {
@@ -41,6 +42,7 @@ const UpdateFeed: React.FC<UpdateFeedProps> = ({ updates, onDismiss }) => {
             message={update.message}
             timestamp={update.timestamp}
             isNew={update.isNew}
+            details={update.details}
             onDismiss={onDismiss ? () => onDismiss(update.id) : undefined}
           />
         </div>
