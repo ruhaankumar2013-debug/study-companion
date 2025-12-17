@@ -14,6 +14,7 @@ interface SyncRequest {
 const VERACROSS_URLS = {
   portal: 'https://portals.veracross.com/sns/student',
   overview: 'https://portals.veracross.com/sns/student/student/overview',
+  messages: 'https://portals.veracross.com/sns/student/messages',
   attendance: 'https://documents.veracross.com/sns/attendance/153227?grading_period=4&key=_',
   reportCard: 'https://documents.veracross.com/sns/report_card/85267?grading_period=2&pad=104784',
   courses: [
@@ -420,6 +421,72 @@ Deno.serve(async (req) => {
       syncResults.push({
         type: 'overview',
         url: VERACROSS_URLS.overview,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+
+    // Scrape messages page
+    try {
+      console.log('Scraping messages...');
+      const { html, status } = await fetchPage(VERACROSS_URLS.messages, cookies);
+      
+      const messagesData = {
+        source: 'messages',
+        rawLength: html.length,
+        content: html.substring(0, 10000),
+      };
+      const contentHash = simpleHash(JSON.stringify(messagesData));
+      
+      // Get existing snapshot
+      const { data: existingSnapshot } = await supabase
+        .from('page_snapshots')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('page_type', 'announcements')
+        .order('captured_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      // Check if content changed and has meaningful content
+      if (!existingSnapshot || existingSnapshot.content_hash !== contentHash) {
+        await supabase.from('page_snapshots').insert({
+          user_id: userId,
+          page_type: 'announcements',
+          content_hash: contentHash,
+          parsed_data: messagesData,
+          raw_content: html.substring(0, 50000),
+          captured_at: new Date().toISOString(),
+        });
+
+        // Only create change notification if there's meaningful text content
+        if (existingSnapshot && hasMeaningfulContent(html)) {
+          await supabase.from('detected_changes').insert({
+            user_id: userId,
+            page_type: 'announcements',
+            category: 'announcement_added',
+            title: 'New Message',
+            message: 'You have new messages in your inbox',
+            details: { source: 'messages' },
+            is_read: false,
+            detected_at: new Date().toISOString(),
+          });
+          allChanges.push({ category: 'announcement_added', title: 'New Message' });
+        }
+      }
+
+      syncResults.push({
+        type: 'messages',
+        url: VERACROSS_URLS.messages,
+        status,
+        dataLength: html.length,
+        pagesFound: 0,
+        changesDetected: existingSnapshot && existingSnapshot.content_hash !== contentHash ? 1 : 0
+      });
+    } catch (error) {
+      console.error('Error scraping messages:', error);
+      syncResults.push({
+        type: 'messages',
+        url: VERACROSS_URLS.messages,
         error: error instanceof Error ? error.message : 'Unknown error'
       });
     }
