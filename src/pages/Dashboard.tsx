@@ -19,7 +19,8 @@ import {
   AlertCircle,
   CheckCircle2,
   Mail,
-  Power
+  Power,
+  Clock
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { User } from '@supabase/supabase-js';
@@ -37,6 +38,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
+import { Slider } from '@/components/ui/slider';
 
 interface DashboardProps {
   user: User;
@@ -73,6 +75,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
     deleteChange,
     updateNotificationEmail,
     toggleAutoSync,
+    updateSyncInterval,
     unreadCount 
   } = useVerracrossSync(user.id);
   
@@ -110,7 +113,18 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
     if (success) {
       toast({
         title: enabled ? 'Auto-sync enabled ✓' : 'Auto-sync disabled',
-        description: enabled ? 'Checking for updates every 15 minutes' : 'Automatic checking is paused',
+        description: enabled ? `Checking for updates every ${syncStatus?.sync_interval || 15} minutes` : 'Automatic checking is paused',
+      });
+    }
+  };
+
+  const handleIntervalChange = async (value: number[]) => {
+    const interval = value[0];
+    const success = await updateSyncInterval(interval);
+    if (success) {
+      toast({
+        title: 'Sync interval updated',
+        description: `Now checking every ${interval} minutes`,
       });
     }
   };
@@ -350,20 +364,50 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
             </CardHeader>
             <CardContent className="space-y-6">
               {/* Auto Sync Toggle */}
-              <div className="flex items-center justify-between p-4 rounded-xl bg-muted/30 border">
-                <div className="flex items-center gap-3">
-                  <Power className="w-5 h-5 text-mint" />
-                  <div>
-                    <p className="font-medium">Auto-Sync (Every 15 min)</p>
-                    <p className="text-sm text-muted-foreground">
-                      Automatically check Veracross for updates
-                    </p>
+              <div className="p-4 rounded-xl bg-muted/30 border space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <Power className="w-5 h-5 text-mint" />
+                    <div>
+                      <p className="font-medium">Auto-Sync</p>
+                      <p className="text-sm text-muted-foreground">
+                        Automatically check Veracross for updates
+                      </p>
+                    </div>
                   </div>
+                  <Switch
+                    checked={syncStatus?.auto_sync_enabled ?? true}
+                    onCheckedChange={handleToggleAutoSync}
+                  />
                 </div>
-                <Switch
-                  checked={syncStatus?.auto_sync_enabled ?? true}
-                  onCheckedChange={handleToggleAutoSync}
-                />
+
+                {/* Sync Interval Slider */}
+                {syncStatus?.auto_sync_enabled && (
+                  <div className="space-y-3 pt-2 border-t border-border/50">
+                    <div className="flex items-center gap-3">
+                      <Clock className="w-5 h-5 text-peach" />
+                      <div>
+                        <p className="font-medium">Sync Interval</p>
+                        <p className="text-sm text-muted-foreground">
+                          Check every <span className="font-semibold text-foreground">{syncStatus?.sync_interval || 15}</span> minutes
+                        </p>
+                      </div>
+                    </div>
+                    <Slider
+                      value={[syncStatus?.sync_interval || 15]}
+                      onValueCommit={handleIntervalChange}
+                      min={5}
+                      max={60}
+                      step={5}
+                      className="w-full"
+                    />
+                    <div className="flex justify-between text-xs text-muted-foreground">
+                      <span>5 min</span>
+                      <span>30 min</span>
+                      <span>60 min</span>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Email Notifications */}

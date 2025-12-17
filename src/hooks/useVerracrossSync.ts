@@ -13,6 +13,7 @@ export interface SyncStatus {
   failed_syncs: number;
   notification_email: string | null;
   auto_sync_enabled: boolean;
+  sync_interval: number;
 }
 
 export interface DetectedChange {
@@ -89,6 +90,7 @@ export function useVerracrossSync(userId: string | null) {
         failed_syncs: syncData.failed_syncs,
         notification_email: syncData.notification_email ?? null,
         auto_sync_enabled: syncData.auto_sync_enabled ?? true,
+        sync_interval: syncData.sync_interval ?? 15,
       });
     }
   }, [userId]);
@@ -268,6 +270,24 @@ export function useVerracrossSync(userId: string | null) {
     }
     return false;
   }, [userId]);
+
+  // Update sync interval
+  const updateSyncInterval = useCallback(async (interval: number) => {
+    if (!userId) return;
+
+    const { error } = await supabase
+      .from('sync_status')
+      .upsert({
+        user_id: userId,
+        sync_interval: interval,
+      }, { onConflict: 'user_id' });
+
+    if (!error) {
+      setSyncStatus(prev => prev ? { ...prev, sync_interval: interval } : null);
+      return true;
+    }
+    return false;
+  }, [userId]);
   const deleteChange = useCallback(async (changeId: string) => {
     const { error } = await supabase
       .from('detected_changes')
@@ -351,6 +371,7 @@ export function useVerracrossSync(userId: string | null) {
     deleteChange,
     updateNotificationEmail,
     toggleAutoSync,
+    updateSyncInterval,
     unreadCount: changes.filter(c => !c.is_read).length,
     refreshSnapshots: fetchRawSnapshots,
   };
