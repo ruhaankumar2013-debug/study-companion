@@ -92,6 +92,7 @@ export type Database = {
           next_scheduled_sync: string | null
           notification_email: string | null
           successful_syncs: number
+          sync_interval: number
           total_syncs: number
           user_id: string
         }
@@ -106,6 +107,7 @@ export type Database = {
           next_scheduled_sync?: string | null
           notification_email?: string | null
           successful_syncs?: number
+          sync_interval?: number
           total_syncs?: number
           user_id: string
         }
@@ -120,6 +122,7 @@ export type Database = {
           next_scheduled_sync?: string | null
           notification_email?: string | null
           successful_syncs?: number
+          sync_interval?: number
           total_syncs?: number
           user_id?: string
         }
